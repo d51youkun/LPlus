@@ -1,0 +1,84 @@
+name: Build LPlus diagnostics IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "復号済みLINE IPAを直接返すhttps:// URL"
+        required: true
+        type: string
+      release_tag:
+        description: "Releaseタグ（空欄なら lplus-diagnostics-<実行番号>）"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish LPlus diagnostics IPA
+    runs-on: macos-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Download and validate LINE IPA
+        env:
+          IPA_URL: ${{ inputs.ipa_url }}
+        run: |
+          set -euo pipefail
+          case "$IPA_URL" in https://*) ;; *) echo "ipa_url must start with https://" >&2; exit 1 ;; esac
+          curl --fail --location --proto '=https' --proto-redir '=https' --retry 3 \
+            --connect-timeout 20 --max-time 1800 --output line.ipa "$IPA_URL"
+          test -s line.ipa
+          unzip -tq line.ipa
+          unzip -q line.ipa -d line-extracted
+          test -f line-extracted/Payload/LINE.app/Info.plist
+
+      - name: Install Theos
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/theos/theos.git "$RUNNER_TEMP/theos"
+          git clone --depth 1 https://github.com/theos/sdks.git "$RUNNER_TEMP/theos/sdks"
+          echo "THEOS=$RUNNER_TEMP/theos" >> "$GITHUB_ENV"
+
+      - name: Build LPlus diagnostics deb
+        working-directory: lplus/diagnostic
+        run: |
+          set -euo pipefail
+          make package FINALPACKAGE=1 THEOS="$THEOS"
+          deb=$(find packages -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$deb"
+          echo "DIAGNOSTIC_DEB=$GITHUB_WORKSPACE/lplus/diagnostic/$deb" >> "$GITHUB_ENV"
+
+      - name: Install cyan
+        run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Inject diagnostics into IPA
+        run: |
+          set -euo pipefail
+          cyan -i line.ipa -o LPlusDiagnostics.ipa -uwef "$DIAGNOSTIC_DEB" -n "LINE Diagnostics" -b jp.naver.line
+          test -s LPlusDiagnostics.ipa
+          unzip -tq LPlusDiagnostics.ipa
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          tag="$INPUT_RELEASE_TAG"
+          if [ -z "$tag" ]; then tag="lplus-diagnostics-$RUN_NUMBER"; fi
+          if ! printf '%s' "$tag" | grep -Eq '^[A-Za-z0-9._/-]+$'; then exit 1; fi
+          if gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" LPlusDiagnostics.ipa --repo "$REPOSITORY" --clobber
+          else
+            gh release create "$tag" LPlusDiagnostics.ipa --repo "$REPOSITORY" --target "$SHA" \
+              --title "LPlus Diagnostics ($tag)" \
+              --notes "LINE向けLPlus診断用の未署名IPAです。"
+          fi

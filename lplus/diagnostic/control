@@ -1,0 +1,9 @@
+Package: com.lplus.diagnostics
+Name: LPlus Diagnostics
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Runtime diagnostics for the LPlus clean-room project.
+Maintainer: LPlus
+Author: LPlus
+Section: Tweaks
+Depends: firmware (>= 18.0)
