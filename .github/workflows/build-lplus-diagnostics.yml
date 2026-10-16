@@ -40,7 +40,7 @@ jobs:
       - name: Install Theos
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/theos/theos.git "$RUNNER_TEMP/theos"
+          git clone --depth 1 --recurse-submodules https://github.com/theos/theos.git "$RUNNER_TEMP/theos"
           git clone --depth 1 https://github.com/theos/sdks.git "$RUNNER_TEMP/theos-sdks"
           mkdir -p "$RUNNER_TEMP/theos/sdks"
           cp -R "$RUNNER_TEMP/theos-sdks/." "$RUNNER_TEMP/theos/sdks/"
